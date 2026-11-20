@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { LiveLedgerSDK, parseSms, type StorageLike } from "@/sdk/liveledger-sdk";
 
 const now = () => new Date(2026, 10, 20, 11, 5);
-const sdk = (storage?: StorageLike) => new LiveLedgerSDK({ now, storage });
+const sdk = (storage: StorageLike | null = null) => new LiveLedgerSDK({ now, storage });
 
 function memoryStorage(): StorageLike & { data: Map<string, string> } {
   const data = new Map<string, string>();
