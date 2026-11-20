@@ -1,26 +1,19 @@
-# Wishes Into Working Things
+# LiveLedger: Your real balance, right now
+Team Phoenix, Sanskaram University | Innovate India Hackathon 2026
 
-make my words  and get my instructions and build this
+Bank balances can lag an hour or more behind real spending. LiveLedger parses instant UPI alerts,
+shows a live balance (confirmed balance minus pending payments), and reconciles it with the bank statement,
+flagging mismatches.
 
-This project was built with [Lovable](https://lovable.dev).
+Live demo: <paste your Lovable link>
+Prototype uses simulated data. No real bank connection.
 
-**Live app**: https://wishes-into-working-things.lovable.app
+How it works: Alert -> Pending -> Live balance -> Bank statement -> Reconcile
+Live balance = Confirmed balance - Pending debits + Pending credits
 
-## Build with Lovable
+Features: SMS parser (debit/credit, several formats, ignores OTP, duplicate detection),
+live vs confirmed balance, low-balance alert, statement sync, mismatch detection.
 
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/6e31e13b-f892-4392-8c13-aa948ead9657).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
-
-```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
-```
+Limitations: the live balance is an estimate until the bank confirms it. A real app would read SMS or
+notifications on the device with the user's permission.
+Future work: Android notification listener, more banks, Account Aggregator consent.
