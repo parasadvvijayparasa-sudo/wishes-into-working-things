@@ -4,15 +4,15 @@ import { Dashboard } from "@/components/liveledger/Dashboard";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "LiveLedger — Your real balance, right now" },
+      { title: "LiveLedger SDK — Real-time balance & SMS reconciliation" },
       {
         name: "description",
-        content: "See your live balance including pending UPI payments before your bank updates.",
+        content: "Drop-in real-time balance and SMS reconciliation engine for Indian banking apps, with a live host app demo.",
       },
-      { property: "og:title", content: "LiveLedger — Your real balance, right now" },
+      { property: "og:title", content: "LiveLedger SDK — Real-time balance & SMS reconciliation" },
       {
         property: "og:description",
-        content: "See your live balance including pending UPI payments before your bank updates.",
+        content: "Drop-in real-time balance and SMS reconciliation engine for Indian banking apps, with a live host app demo.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

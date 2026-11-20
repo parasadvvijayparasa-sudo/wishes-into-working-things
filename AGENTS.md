@@ -30,5 +30,5 @@ use the editor.
 <!-- LOVABLE:END -->
 
 ## Project rules
-- Ledger math and SMS parsing live as pure functions in `src/lib/` (covered by `src/test/`); UI only calls them — keeps rules testable without a browser.
-- Demo state is client-only in localStorage, read in `useEffect` — avoids SSR hydration mismatches and needs no backend.
+- All ledger math, SMS regex parsing, event logging and persistence live in the framework-free `LiveLedgerSDK` class in `src/sdk/liveledger-sdk.ts` (covered by `src/test/`); React only calls its methods and renders `getState()` — keeps the engine drop-in and testable without a browser.
+- The SDK instance bound to localStorage is created in `useEffect` (`use-ledger.ts`); SSR renders a storage-less instance — avoids hydration mismatches and needs no backend.
