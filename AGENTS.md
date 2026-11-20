@@ -28,3 +28,7 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Project rules
+- Ledger math and SMS parsing live as pure functions in `src/lib/` (covered by `src/test/`); UI only calls them — keeps rules testable without a browser.
+- Demo state is client-only in localStorage, read in `useEffect` — avoids SSR hydration mismatches and needs no backend.
