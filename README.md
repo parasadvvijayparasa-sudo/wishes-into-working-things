@@ -23,4 +23,3 @@ Bank balances can lag an hour or more behind real UPI spending. LiveLedger is an
 ## Limitations & Future Scope
 - **Current Limitation:** Projected balance is an on-device estimate until verified by the user or reconciled with the bank statement.
 - **Roadmap:** Android Notification Listener integration (with explicit user consent), broader Indian bank/UPI SMS templates, and RBI Account Aggregator (AA) integration for direct bank verification.
--
