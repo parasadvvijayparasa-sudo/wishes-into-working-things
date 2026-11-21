@@ -15,29 +15,29 @@ function memoryStorage(): StorageLike & { data: Map<string, string> } {
 }
 
 describe("LiveLedgerSDK balances", () => {
-  it("starts at Rs. 12,100 confirmed and Rs. 11,450 live with 2 pending", () => {
+  it("starts at Rs. 12,100 verified and Rs. 11,450 projected with 2 pending", () => {
     const s = sdk().getState();
-    expect(s.confirmedBalance).toBe(12100);
-    expect(s.liveBalance).toBe(11450);
+    expect(s.verifiedBalance).toBe(12100);
+    expect(s.projectedBalance).toBe(11450);
     expect(s.pendingCount).toBe(2);
     expect(s.pendingTotal).toBe(650);
     expect(s.spentToday).toBe(950);
     expect(s.lowBalanceLimit).toBe(11000);
     expect(s.isLowBalance).toBe(false);
   });
-  it("adds a valid SMS as PENDING at the top without changing confirmed", () => {
+  it("adds a valid SMS as PENDING from SMS at the top without changing verified", () => {
     const l = sdk();
     expect(l.ingestSMS("Rs. 500.00 debited via UPI to Zomato on 20-11-26").status).toBe("ADDED");
     const s = l.getState();
-    expect(s.transactions[0]).toMatchObject({ name: "Zomato (UPI)", amount: 500, status: "PENDING" });
-    expect(s.confirmedBalance).toBe(12100);
-    expect(s.liveBalance).toBe(10950);
+    expect(s.transactions[0]).toMatchObject({ name: "Zomato (UPI)", amount: 500, status: "PENDING", source: "SMS" });
+    expect(s.verifiedBalance).toBe(12100);
+    expect(s.projectedBalance).toBe(10950);
     expect(s.isLowBalance).toBe(true);
   });
-  it("a pending credit raises live balance but not spent today", () => {
+  it("a pending credit raises projected balance but not spent today", () => {
     const l = sdk();
     l.ingestSMS("Rs.1500 credited to A/c XX1234 from VPA ravi@okaxis");
-    expect(l.getState().liveBalance).toBe(12950);
+    expect(l.getState().projectedBalance).toBe(12950);
     expect(l.getState().spentToday).toBe(950);
   });
   it("blocks a duplicate UPI Ref", () => {
@@ -49,13 +49,14 @@ describe("LiveLedgerSDK balances", () => {
     expect(l.ingestSMS("Get Rs. 500 cashback! Apply now at www.example.com").status).toBe("IGNORED_PROMO");
     expect(l.getState().transactions).toHaveLength(3);
   });
-  it("syncStatement posts everything so confirmed equals live", () => {
+  it("syncStatement verifies every pending entry via the bank", () => {
     const l = sdk();
     l.syncStatement();
     const s = l.getState();
-    expect(s.confirmedBalance).toBe(11450);
-    expect(s.liveBalance).toBe(11450);
+    expect(s.verifiedBalance).toBe(11450);
+    expect(s.projectedBalance).toBe(11450);
     expect(s.pendingCount).toBe(0);
+    expect(s.transactions.every((t) => t.status === "VERIFIED_SMS")).toBe(true);
   });
   it("simulateMismatch flags the top transaction at ten times the alert", () => {
     const l = sdk();
@@ -71,6 +72,48 @@ describe("LiveLedgerSDK balances", () => {
   });
 });
 
+describe("LiveLedgerSDK pending vs verified", () => {
+  it("every seed entry has a status and an SMS source", () => {
+    expect(sdk().getState().transactions.map((t) => [t.status, t.source])).toEqual([
+      ["PENDING", "SMS"],
+      ["PENDING", "SMS"],
+      ["VERIFIED_SMS", "SMS"],
+    ]);
+  });
+  it("confirming a pending entry marks it VERIFIED_MANUAL and moves it into the verified balance", () => {
+    const l = sdk();
+    expect(l.confirmTransaction("seed-2").status).toBe("OK");
+    const s = l.getState();
+    expect(s.transactions.find((t) => t.id === "seed-2")?.status).toBe("VERIFIED_MANUAL");
+    expect(s.verifiedBalance).toBe(11650);
+    expect(s.projectedBalance).toBe(11450);
+    expect(s.pendingCount).toBe(1);
+    expect(s.pendingTotal).toBe(200);
+  });
+  it("cannot confirm an already verified or unknown entry", () => {
+    const l = sdk();
+    expect(l.confirmTransaction("seed-1").status).toBe("ALREADY_VERIFIED");
+    expect(l.confirmTransaction("nope").status).toBe("NOT_FOUND");
+    expect(l.getState().verifiedBalance).toBe(12100);
+    expect(l.getState().eventLog[0]).toMatchObject({ method: "confirmTransaction", status: "NOT_FOUND" });
+  });
+  it("syncStatement leaves manually confirmed entries as VERIFIED_MANUAL", () => {
+    const l = sdk();
+    l.confirmTransaction("seed-3");
+    l.syncStatement();
+    expect(l.getState().transactions.map((t) => t.status)).toEqual(["VERIFIED_MANUAL", "VERIFIED_SMS", "VERIFIED_SMS"]);
+  });
+  it("upgrades entries saved by the older version", () => {
+    const storage = memoryStorage();
+    storage.setItem("liveledger-sdk:v1", JSON.stringify({
+      openingBalance: 12400, lowBalanceLimit: 11000, mismatch: null, eventLog: [],
+      transactions: [{ id: "old", name: "Cafe (UPI)", time: "10:40 AM", amount: 300, direction: "debit", status: "POSTED", ref: null }],
+    }));
+    expect(sdk(storage).getState().transactions[0]).toMatchObject({ status: "VERIFIED_SMS", source: "SMS" });
+    expect(sdk(storage).getState().verifiedBalance).toBe(12100);
+  });
+});
+
 describe("LiveLedgerSDK persistence and log", () => {
   it("persists state across instances and reset clears storage", () => {
     const storage = memoryStorage();
@@ -79,7 +122,7 @@ describe("LiveLedgerSDK persistence and log", () => {
     expect(again.getState().transactions).toHaveLength(4);
     again.reset();
     expect(storage.data.size).toBe(0);
-    expect(again.getState().liveBalance).toBe(11450);
+    expect(again.getState().projectedBalance).toBe(11450);
     expect(again.getState().mismatch).toBeNull();
   });
   it("logs method calls with statuses and keeps only the last 10", () => {

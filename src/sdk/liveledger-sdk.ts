@@ -3,7 +3,9 @@
  * Framework-free: a host app only calls the public methods and renders getState().
  */
 
-export type TxStatus = "PENDING" | "POSTED";
+/** PENDING = seen in an SMS only; VERIFIED_SMS = matched by the bank statement; VERIFIED_MANUAL = confirmed by the user. */
+export type TxStatus = "PENDING" | "VERIFIED_SMS" | "VERIFIED_MANUAL";
+export type TxSource = "SMS" | "MANUAL";
 export type Direction = "debit" | "credit";
 export type Channel = "UPI" | "Card" | "Bank";
 
@@ -14,6 +16,7 @@ export interface Transaction {
   amount: number;
   direction: Direction;
   status: TxStatus;
+  source: TxSource;
   ref: string | null;
 }
 
@@ -24,7 +27,7 @@ export interface Mismatch {
 }
 
 export type IngestStatus = "ADDED" | "DUPLICATE" | "IGNORED_OTP" | "IGNORED_PROMO" | "IGNORED_NOT_TRANSACTION";
-export type SdkMethod = "ingestSMS" | "syncStatement" | "simulateMismatch" | "setLowBalanceLimit" | "reset";
+export type SdkMethod = "ingestSMS" | "syncStatement" | "simulateMismatch" | "setLowBalanceLimit" | "confirmTransaction" | "reset";
 
 export interface SdkEvent {
   method: SdkMethod;
@@ -34,8 +37,10 @@ export interface SdkEvent {
 
 export interface LedgerState {
   openingBalance: number;
-  confirmedBalance: number;
-  liveBalance: number;
+  /** Opening balance plus verified entries only. */
+  verifiedBalance: number;
+  /** Verified balance plus every pending amount. */
+  projectedBalance: number;
   pendingCount: number;
   pendingTotal: number;
   spentToday: number;
@@ -72,15 +77,17 @@ interface StoredState {
 
 export const DEFAULT_SMS = "Rs. 500.00 debited via UPI to Zomato on 20-11-26";
 export const DEFAULT_STORAGE_KEY = "liveledger-sdk:v1";
+
+export const isVerified = (t: Pick<Transaction, "status">) => t.status === "VERIFIED_SMS" || t.status === "VERIFIED_MANUAL";
 const MAX_EVENTS = 10;
 
 function seedState(): StoredState {
   return {
     openingBalance: 12400,
     transactions: [
-      { id: "seed-3", name: "Cafe (UPI)", time: "10:44 AM", amount: 200, direction: "debit", status: "PENDING", ref: "641200000003" },
-      { id: "seed-2", name: "Cafe (UPI)", time: "10:42 AM", amount: 450, direction: "debit", status: "PENDING", ref: "641200000002" },
-      { id: "seed-1", name: "Cafe (UPI)", time: "10:40 AM", amount: 300, direction: "debit", status: "POSTED", ref: "641200000001" },
+      { id: "seed-3", name: "Cafe (UPI)", time: "10:44 AM", amount: 200, direction: "debit", status: "PENDING", source: "SMS", ref: "641200000003" },
+      { id: "seed-2", name: "Cafe (UPI)", time: "10:42 AM", amount: 450, direction: "debit", status: "PENDING", source: "SMS", ref: "641200000002" },
+      { id: "seed-1", name: "Cafe (UPI)", time: "10:40 AM", amount: 300, direction: "debit", status: "VERIFIED_SMS", source: "SMS", ref: "641200000001" },
     ],
     lowBalanceLimit: 11000,
     mismatch: null,
@@ -171,25 +178,34 @@ export function formatTime(d: Date): string {
 const signed = (t: Transaction) => (t.direction === "credit" ? t.amount : -t.amount);
 
 function derive(s: StoredState): LedgerState {
-  const posted = s.transactions.filter((t) => t.status === "POSTED");
+  const verified = s.transactions.filter(isVerified);
   const pending = s.transactions.filter((t) => t.status === "PENDING");
-  const confirmedBalance = s.openingBalance + posted.reduce((sum, t) => sum + signed(t), 0);
+  const verifiedBalance = s.openingBalance + verified.reduce((sum, t) => sum + signed(t), 0);
   const pendingDebits = pending.filter((t) => t.direction === "debit").reduce((sum, t) => sum + t.amount, 0);
   const pendingCredits = pending.filter((t) => t.direction === "credit").reduce((sum, t) => sum + t.amount, 0);
-  const liveBalance = confirmedBalance - pendingDebits + pendingCredits;
+  const projectedBalance = verifiedBalance - pendingDebits + pendingCredits;
   return {
     openingBalance: s.openingBalance,
-    confirmedBalance,
-    liveBalance,
+    verifiedBalance,
+    projectedBalance,
     pendingCount: pending.length,
     pendingTotal: pendingDebits + pendingCredits,
     spentToday: s.transactions.filter((t) => t.direction === "debit").reduce((sum, t) => sum + t.amount, 0),
     lowBalanceLimit: s.lowBalanceLimit,
-    isLowBalance: liveBalance < s.lowBalanceLimit,
+    isLowBalance: projectedBalance < s.lowBalanceLimit,
     mismatch: s.mismatch,
     transactions: s.transactions.map((t) => ({ ...t })),
     eventLog: s.eventLog.map((e) => ({ ...e })),
   };
+}
+
+/** Upgrades entries saved by older versions (status "POSTED", no source). */
+function normalizeTx(t: Transaction): Transaction {
+  const raw = t as Omit<Transaction, "status" | "source"> & { status: string; source?: string };
+  const status: TxStatus =
+    raw.status === "PENDING" || raw.status === "VERIFIED_SMS" || raw.status === "VERIFIED_MANUAL" ? raw.status : "VERIFIED_SMS";
+  const source: TxSource = raw.source === "MANUAL" ? "MANUAL" : "SMS";
+  return { ...raw, status, source };
 }
 
 /* ---------------- SDK ---------------- */
@@ -228,6 +244,7 @@ export class LiveLedgerSDK {
       amount: parsed.amount,
       direction: parsed.direction,
       status: "PENDING",
+      source: "SMS",
       ref: parsed.ref,
     };
     this.data = { ...this.data, transactions: [transaction, ...this.data.transactions] };
@@ -235,14 +252,29 @@ export class LiveLedgerSDK {
     return { status: "ADDED", transaction: { ...transaction } };
   }
 
-  syncStatement(): { status: "OK"; posted: number } {
-    const posted = this.data.transactions.filter((t) => t.status === "PENDING").length;
+  /** The official statement verifies every pending entry. */
+  syncStatement(): { status: "OK"; verified: number } {
+    const verified = this.data.transactions.filter((t) => t.status === "PENDING").length;
     this.data = {
       ...this.data,
-      transactions: this.data.transactions.map((t) => (t.status === "PENDING" ? { ...t, status: "POSTED" } : t)),
+      transactions: this.data.transactions.map((t) => (t.status === "PENDING" ? { ...t, status: "VERIFIED_SMS" } : t)),
     };
     this.commit("syncStatement", "OK");
-    return { status: "OK", posted };
+    return { status: "OK", verified };
+  }
+
+  /** One-tap user confirmation of a pending entry. */
+  confirmTransaction(txId: string): { status: "OK" | "NOT_FOUND" | "ALREADY_VERIFIED" } {
+    const tx = this.data.transactions.find((t) => t.id === txId);
+    const status = !tx ? "NOT_FOUND" : tx.status !== "PENDING" ? "ALREADY_VERIFIED" : "OK";
+    if (status === "OK") {
+      this.data = {
+        ...this.data,
+        transactions: this.data.transactions.map((t) => (t.id === txId ? { ...t, status: "VERIFIED_MANUAL" } : t)),
+      };
+    }
+    this.commit("confirmTransaction", status);
+    return { status };
   }
 
   simulateMismatch(): { status: "OK"; mismatch: Mismatch } | { status: "NO_TRANSACTIONS" } {
@@ -312,7 +344,7 @@ export class LiveLedgerSDK {
       const saved = JSON.parse(raw) as Partial<StoredState>;
       return {
         openingBalance: typeof saved.openingBalance === "number" ? saved.openingBalance : seed.openingBalance,
-        transactions: Array.isArray(saved.transactions) ? saved.transactions : seed.transactions,
+        transactions: Array.isArray(saved.transactions) ? saved.transactions.map(normalizeTx) : seed.transactions,
         lowBalanceLimit: typeof saved.lowBalanceLimit === "number" ? saved.lowBalanceLimit : seed.lowBalanceLimit,
         mismatch: saved.mismatch ?? null,
         eventLog: Array.isArray(saved.eventLog) ? saved.eventLog.slice(0, MAX_EVENTS) : [],

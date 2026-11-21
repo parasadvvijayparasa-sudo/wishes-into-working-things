@@ -16,6 +16,7 @@ const badgeVariants = cva(
         outline: "text-foreground",
         pending: "border-warning/40 bg-warning-soft text-warning-strong tracking-wide",
         posted: "border-success/30 bg-success-soft text-success tracking-wide",
+        manual: "border-teal/40 bg-teal-soft text-teal-strong tracking-wide",
         estimated: "border-transparent bg-success text-primary-foreground tracking-wider",
         mismatch: "border-transparent bg-destructive text-destructive-foreground tracking-wide",
         muted: "border-border bg-muted text-muted-foreground",

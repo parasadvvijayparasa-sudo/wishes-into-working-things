@@ -18,10 +18,13 @@ const result = ledger.ingestSMS(
 // result.status -> "ADDED" | "DUPLICATE" | "IGNORED_OTP" | ...
 
 // 3. Render balances straight from the SDK
-const { confirmedBalance, liveBalance, pendingCount } = ledger.getState();
+const { verifiedBalance, projectedBalance, pendingCount } = ledger.getState();
 
-// 4. When the official statement arrives, reconcile
-ledger.syncStatement();
+// 4. Let the user confirm a pending entry with one tap
+ledger.confirmTransaction(txId); // PENDING -> VERIFIED_MANUAL
+
+// 5. When the official statement arrives, reconcile the rest
+ledger.syncStatement(); // PENDING -> VERIFIED_SMS
 
 // Optional: re-render on every change
 ledger.subscribe(() => render(ledger.getState()));`;

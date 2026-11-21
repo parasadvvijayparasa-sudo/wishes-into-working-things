@@ -4,6 +4,7 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   BellRing,
+  CheckCheck,
   Clock,
   Landmark,
   MessageSquareText,
@@ -18,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { DEFAULT_SMS, formatRs, type LedgerState, type LiveLedgerSDK, type Transaction } from "@/sdk/liveledger-sdk";
+import { DEFAULT_SMS, formatRs, type LedgerState, type LiveLedgerSDK, type Transaction, type TxStatus } from "@/sdk/liveledger-sdk";
 
 type Feedback = { tone: "success" | "info" | "error"; text: string } | null;
 
@@ -51,7 +52,13 @@ export function HostAppDemo({ ledger, state }: { ledger: LiveLedgerSDK; state: L
 
   const handleSync = () => {
     ledger.syncStatement();
-    setFeedback({ tone: "success", text: "Bank statement synced. All payments are now posted." });
+    setFeedback({ tone: "success", text: "Bank statement synced. All payments are now verified." });
+  };
+
+  const handleConfirm = (tx: Transaction) => {
+    if (ledger.confirmTransaction(tx.id).status === "OK") {
+      setFeedback({ tone: "success", text: `Confirmed ${tx.name}: ${formatRs(tx.amount)} is now verified` });
+    }
   };
 
   const handleMismatch = () => {
@@ -70,7 +77,7 @@ export function HostAppDemo({ ledger, state }: { ledger: LiveLedgerSDK; state: L
       <section className="space-y-5" aria-label="Dashboard">
         {state.isLowBalance && (
           <Banner tone="danger" icon={<BellRing />}>
-            Low Balance Alert: Live balance is below your set limit!
+            Low Balance Alert: Projected balance is below your set limit!
           </Banner>
         )}
         {state.mismatch && (
@@ -88,24 +95,24 @@ export function HostAppDemo({ ledger, state }: { ledger: LiveLedgerSDK; state: L
           <div className="rounded-2xl border bg-card p-5 shadow-card">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Landmark className="size-4" />
-              Confirmed Bank Balance
+              Verified Balance
             </div>
-            <p className="mt-3 font-display text-3xl font-bold tabular sm:text-4xl" data-testid="confirmed">
-              {formatRs(state.confirmedBalance)}
+            <p className="mt-3 font-display text-3xl font-bold tabular sm:text-4xl" data-testid="verified">
+              {formatRs(state.verifiedBalance)}
             </p>
-            <p className="mt-2 text-sm text-muted-foreground">Last bank statement sync</p>
+            <p className="mt-2 text-sm text-muted-foreground">Only payments verified by the bank or by you</p>
           </div>
 
           <div className="relative rounded-2xl border-2 border-teal bg-card p-5 shadow-live">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-sm font-medium text-teal-strong">
                 <Zap className="size-4" />
-                Live Balance
+                Projected Balance
               </div>
-              <Badge variant="estimated">ESTIMATED</Badge>
+              <Badge variant="estimated">PROJECTED</Badge>
             </div>
-            <p className="mt-3 font-display text-3xl font-bold tabular sm:text-4xl" data-testid="live">
-              {formatRs(state.liveBalance)}
+            <p className="mt-3 font-display text-3xl font-bold tabular sm:text-4xl" data-testid="projected">
+              {formatRs(state.projectedBalance)}
             </p>
             <p className="mt-2 text-sm text-muted-foreground">Includes {plural(state.pendingCount, "pending payment")}</p>
           </div>
@@ -116,7 +123,7 @@ export function HostAppDemo({ ledger, state }: { ledger: LiveLedgerSDK; state: L
             <label htmlFor="low-limit" className="text-sm font-semibold">
               Low Balance Alert
             </label>
-            <p className="text-sm text-muted-foreground">Warn me when my live balance drops below</p>
+            <p className="text-sm text-muted-foreground">Warn me when my projected balance drops below</p>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-muted-foreground">Rs.</span>
@@ -139,7 +146,7 @@ export function HostAppDemo({ ledger, state }: { ledger: LiveLedgerSDK; state: L
           </div>
           <ul className="divide-y">
             {state.transactions.map((tx) => (
-              <TxRow key={tx.id} tx={tx} mismatch={state.mismatch?.txId === tx.id} />
+              <TxRow key={tx.id} tx={tx} mismatch={state.mismatch?.txId === tx.id} onConfirm={handleConfirm} />
             ))}
             {state.transactions.length === 0 && (
               <li className="px-5 py-8 text-center text-sm text-muted-foreground">No transactions yet</li>
@@ -250,10 +257,17 @@ function Banner({ tone, icon, children }: { tone: "warning" | "danger"; icon: Re
   );
 }
 
-function TxRow({ tx, mismatch }: { tx: Transaction; mismatch: boolean }) {
+const STATUS_BADGE: Record<TxStatus, { label: string; variant: "pending" | "posted" | "manual" }> = {
+  PENDING: { label: "Pending SMS", variant: "pending" },
+  VERIFIED_SMS: { label: "Verified · Bank", variant: "posted" },
+  VERIFIED_MANUAL: { label: "Verified · Manual", variant: "manual" },
+};
+
+function TxRow({ tx, mismatch, onConfirm }: { tx: Transaction; mismatch: boolean; onConfirm: (tx: Transaction) => void }) {
   const isDebit = tx.direction === "debit";
+  const badge = STATUS_BADGE[tx.status];
   return (
-    <li className={cn("flex items-center gap-3 px-5 py-4", mismatch && "bg-danger-soft")}>
+    <li className={cn("flex items-start gap-3 px-5 py-4", mismatch && "bg-danger-soft")}>
       <div
         className={cn(
           "grid size-10 shrink-0 place-items-center rounded-xl",
@@ -264,17 +278,29 @@ function TxRow({ tx, mismatch }: { tx: Transaction; mismatch: boolean }) {
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold">{tx.name}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">{tx.time}</span>
+        <div className="mt-0.5 text-xs text-muted-foreground">
+          {tx.time} • from {tx.source === "SMS" ? "SMS" : "manual entry"}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <Badge variant={badge.variant}>{badge.label}</Badge>
           {mismatch && <Badge variant="mismatch">MISMATCH DETECTED</Badge>}
+          {tx.status === "PENDING" && (
+            <Button
+              size="sm"
+              variant="teal"
+              className="h-7 gap-1 rounded-lg px-2.5 text-xs"
+              onClick={() => onConfirm(tx)}
+              aria-label={`Confirm ${tx.name} ${formatRs(tx.amount)}`}
+            >
+              <CheckCheck className="size-3.5" />
+              Confirm
+            </Button>
+          )}
         </div>
       </div>
-      <div className="flex flex-col items-end gap-1.5">
-        <span className={cn("font-display font-bold tabular", isDebit ? "text-foreground" : "text-teal-strong")}>
-          {isDebit ? "-" : "+"} {formatRs(tx.amount)}
-        </span>
-        <Badge variant={tx.status === "PENDING" ? "pending" : "posted"}>{tx.status}</Badge>
-      </div>
+      <span className={cn("self-start font-display font-bold tabular", isDebit ? "text-foreground" : "text-teal-strong")}>
+        {isDebit ? "-" : "+"} {formatRs(tx.amount)}
+      </span>
     </li>
   );
 }
