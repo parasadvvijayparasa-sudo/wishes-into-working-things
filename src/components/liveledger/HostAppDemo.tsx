@@ -19,7 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { DEFAULT_SMS, formatRs, type LedgerState, type LiveLedgerSDK, type Transaction, type TxStatus } from "@/sdk/liveledger-sdk";
+import { ManualEntryDialog } from "./ManualEntryDialog";
+import { DEFAULT_SMS, formatRs, type ManualEntry, type LedgerState, type LiveLedgerSDK, type Transaction, type TxStatus } from "@/sdk/liveledger-sdk";
 
 type Feedback = { tone: "success" | "info" | "error"; text: string } | null;
 
@@ -59,6 +60,18 @@ export function HostAppDemo({ ledger, state }: { ledger: LiveLedgerSDK; state: L
     if (ledger.confirmTransaction(tx.id).status === "OK") {
       setFeedback({ tone: "success", text: `Confirmed ${tx.name}: ${formatRs(tx.amount)} is now verified` });
     }
+  };
+
+  const handleManual = (entry: ManualEntry) => {
+    const result = ledger.addManualTransaction(entry);
+    if (result.status === "ADDED") {
+      const tx = result.transaction;
+      setFeedback({
+        tone: "success",
+        text: `Logged ${tx.name}: ${tx.direction === "debit" ? "-" : "+"} ${formatRs(tx.amount)} (${tx.status === "PENDING" ? "pending" : "verified"})`,
+      });
+    }
+    return result;
   };
 
   const handleMismatch = () => {
@@ -142,7 +155,10 @@ export function HostAppDemo({ ledger, state }: { ledger: LiveLedgerSDK; state: L
         <div className="overflow-hidden rounded-2xl border bg-card shadow-card">
           <div className="flex items-center justify-between border-b px-5 py-4">
             <h2 className="font-display text-base font-semibold">Transactions</h2>
-            <span className="text-xs text-muted-foreground">{plural(state.transactions.length, "item")}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">{plural(state.transactions.length, "item")}</span>
+              <ManualEntryDialog onAdd={handleManual} />
+            </div>
           </div>
           <ul className="divide-y">
             {state.transactions.map((tx) => (
@@ -258,14 +274,14 @@ function Banner({ tone, icon, children }: { tone: "warning" | "danger"; icon: Re
 }
 
 const STATUS_BADGE: Record<TxStatus, { label: string; variant: "pending" | "posted" | "manual" }> = {
-  PENDING: { label: "Pending SMS", variant: "pending" },
+  PENDING: { label: "Pending", variant: "pending" },
   VERIFIED_SMS: { label: "Verified · Bank", variant: "posted" },
   VERIFIED_MANUAL: { label: "Verified · Manual", variant: "manual" },
 };
 
 function TxRow({ tx, mismatch, onConfirm }: { tx: Transaction; mismatch: boolean; onConfirm: (tx: Transaction) => void }) {
   const isDebit = tx.direction === "debit";
-  const badge = STATUS_BADGE[tx.status];
+  const badge = tx.status === "PENDING" && tx.source === "SMS" ? { label: "Pending SMS", variant: "pending" as const } : STATUS_BADGE[tx.status];
   return (
     <li className={cn("flex items-start gap-3 px-5 py-4", mismatch && "bg-danger-soft")}>
       <div
@@ -279,7 +295,7 @@ function TxRow({ tx, mismatch, onConfirm }: { tx: Transaction; mismatch: boolean
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold">{tx.name}</p>
         <div className="mt-0.5 text-xs text-muted-foreground">
-          {tx.time} • from {tx.source === "SMS" ? "SMS" : "manual entry"}
+          {tx.time} • from {tx.source === "SMS" ? "SMS" : "Manual"}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <Badge variant={badge.variant}>{badge.label}</Badge>

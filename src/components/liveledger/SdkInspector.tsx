@@ -20,10 +20,16 @@ const result = ledger.ingestSMS(
 // 3. Render balances straight from the SDK
 const { verifiedBalance, projectedBalance, pendingCount } = ledger.getState();
 
-// 4. Let the user confirm a pending entry with one tap
+// 4. Log a payment by hand when no SMS arrives
+ledger.addManualTransaction({
+  name: "Auto rickshaw", amount: 120, direction: "debit",
+  status: "PENDING", // or "VERIFIED_MANUAL"
+});
+
+// 5. Let the user confirm a pending entry with one tap
 ledger.confirmTransaction(txId); // PENDING -> VERIFIED_MANUAL
 
-// 5. When the official statement arrives, reconcile the rest
+// 6. When the official statement arrives, reconcile the rest
 ledger.syncStatement(); // PENDING -> VERIFIED_SMS
 
 // Optional: re-render on every change

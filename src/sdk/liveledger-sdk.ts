@@ -27,7 +27,7 @@ export interface Mismatch {
 }
 
 export type IngestStatus = "ADDED" | "DUPLICATE" | "IGNORED_OTP" | "IGNORED_PROMO" | "IGNORED_NOT_TRANSACTION";
-export type SdkMethod = "ingestSMS" | "syncStatement" | "simulateMismatch" | "setLowBalanceLimit" | "confirmTransaction" | "reset";
+export type SdkMethod = "ingestSMS" | "syncStatement" | "simulateMismatch" | "setLowBalanceLimit" | "confirmTransaction" | "addManualTransaction" | "reset";
 
 export interface SdkEvent {
   method: SdkMethod;
@@ -54,6 +54,21 @@ export interface LedgerState {
 export type IngestResult =
   | { status: "ADDED"; transaction: Transaction }
   | { status: Exclude<IngestStatus, "ADDED">; transaction?: undefined };
+
+/** A payment the user logs by hand when no bank SMS arrives. */
+export interface ManualEntry {
+  name: string;
+  amount: number;
+  direction: Direction;
+  /** Defaults to "PENDING". */
+  status?: "PENDING" | "VERIFIED_MANUAL";
+}
+
+export type ManualResult =
+  | { status: "ADDED"; transaction: Transaction }
+  | { status: "INVALID"; reason: "name" | "amount"; transaction?: undefined };
+
+export const MAX_MANUAL_NAME = 40;
 
 export interface StorageLike {
   getItem(key: string): string | null;
@@ -261,6 +276,34 @@ export class LiveLedgerSDK {
     };
     this.commit("syncStatement", "OK");
     return { status: "OK", verified };
+  }
+
+  /** Logs a payment by hand (source MANUAL), either still pending or already verified by the user. */
+  addManualTransaction(entry: ManualEntry): ManualResult {
+    const name = entry.name.replace(/\s+/g, " ").trim();
+    const amount = Math.round(entry.amount * 100) / 100;
+    if (!name || name.length > MAX_MANUAL_NAME) {
+      this.commit("addManualTransaction", "INVALID_NAME");
+      return { status: "INVALID", reason: "name" };
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      this.commit("addManualTransaction", "INVALID_AMOUNT");
+      return { status: "INVALID", reason: "amount" };
+    }
+    const now = this.now();
+    const transaction: Transaction = {
+      id: `tx-${now.getTime()}-${++this.counter}`,
+      name,
+      time: formatTime(now),
+      amount,
+      direction: entry.direction === "credit" ? "credit" : "debit",
+      status: entry.status === "VERIFIED_MANUAL" ? "VERIFIED_MANUAL" : "PENDING",
+      source: "MANUAL",
+      ref: null,
+    };
+    this.data = { ...this.data, transactions: [transaction, ...this.data.transactions] };
+    this.commit("addManualTransaction", "ADDED");
+    return { status: "ADDED", transaction: { ...transaction } };
   }
 
   /** One-tap user confirmation of a pending entry. */

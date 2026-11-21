@@ -114,6 +114,42 @@ describe("LiveLedgerSDK pending vs verified", () => {
   });
 });
 
+describe("LiveLedgerSDK manual entries", () => {
+  it("logs a pending manual debit at the top with source MANUAL", () => {
+    const l = sdk();
+    const r = l.addManualTransaction({ name: "  Auto rickshaw ", amount: 120, direction: "debit" });
+    expect(r.status).toBe("ADDED");
+    const s = l.getState();
+    expect(s.transactions[0]).toMatchObject({ name: "Auto rickshaw", amount: 120, direction: "debit", status: "PENDING", source: "MANUAL", ref: null });
+    expect(s.verifiedBalance).toBe(12100);
+    expect(s.projectedBalance).toBe(11330);
+    expect(s.spentToday).toBe(1070);
+  });
+  it("a manual entry added as Verified · Manual counts in the verified balance", () => {
+    const l = sdk();
+    l.addManualTransaction({ name: "Salary cash", amount: 2000, direction: "credit", status: "VERIFIED_MANUAL" });
+    const s = l.getState();
+    expect(s.transactions[0]).toMatchObject({ status: "VERIFIED_MANUAL", source: "MANUAL" });
+    expect(s.verifiedBalance).toBe(14100);
+    expect(s.projectedBalance).toBe(13450);
+    expect(s.pendingCount).toBe(2);
+  });
+  it("a pending manual entry can be confirmed", () => {
+    const l = sdk();
+    const r = l.addManualTransaction({ name: "Tea stall", amount: 30, direction: "debit" });
+    expect(l.confirmTransaction(r.transaction?.id ?? "").status).toBe("OK");
+    expect(l.getState().verifiedBalance).toBe(12070);
+  });
+  it("rejects an empty name or a zero / negative amount", () => {
+    const l = sdk();
+    expect(l.addManualTransaction({ name: "  ", amount: 50, direction: "debit" })).toMatchObject({ status: "INVALID", reason: "name" });
+    expect(l.addManualTransaction({ name: "Shop", amount: 0, direction: "debit" })).toMatchObject({ status: "INVALID", reason: "amount" });
+    expect(l.addManualTransaction({ name: "Shop", amount: -5, direction: "debit" })).toMatchObject({ status: "INVALID", reason: "amount" });
+    expect(l.getState().transactions).toHaveLength(3);
+    expect(l.getState().eventLog[0]).toMatchObject({ method: "addManualTransaction", status: "INVALID_AMOUNT" });
+  });
+});
+
 describe("LiveLedgerSDK persistence and log", () => {
   it("persists state across instances and reset clears storage", () => {
     const storage = memoryStorage();
